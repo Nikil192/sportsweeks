@@ -1,0 +1,21 @@
+{
+  "name": "SportWeek - Weekly Schedule",
+  "short_name": "SportWeek",
+  "description": "Weekly sports schedule for Cricket, Football, F1 and Badminton in IST",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#f59e0b",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
