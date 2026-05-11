@@ -45,18 +45,28 @@ export default async function handler(req, res) {
                  name.includes("trophy") ||
                  name.includes("t20");
         })
-        .map(match => ({
-          idEvent: match.id,
-          strEvent: match.name,
-          strLeague: match.series || "Cricket",
-          strTimestamp: match.dateTimeGMT,
-          strStatus: match.status,
-          strSport: "Cricket",
-          strHomeTeam: match.teams[0],
-          strAwayTeam: match.teams[1],
-          strThumb: "", 
-        }));
-    }
+        .map(match => {
+          const matchName = match.name.toLowerCase();
+          
+          // Force the IPL ID so your frontend recognizes it!
+          let leagueId = "4844"; // default to ICC mens
+          if (matchName.includes("ipl") || matchName.includes("indian premier league")) {
+             leagueId = "4910"; // Matches your LEAGUES.cricket_ipl.id
+          }
+
+          return {
+            idEvent: match.id,
+            idLeague: leagueId, // <-- THIS IS THE FIX!
+            strEvent: match.name,
+            strLeague: match.series || "Cricket",
+            strTimestamp: match.dateTimeGMT,
+            strStatus: match.status,
+            strSport: "Cricket",
+            strHomeTeam: match.teams[0],
+            strAwayTeam: match.teams[1],
+            strThumb: "", 
+          };
+        })
 
     // 3. MERGE EVERYTHING
     // F1/Football comes first, Cricket gets added to the list
