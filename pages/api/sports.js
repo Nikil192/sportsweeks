@@ -1,153 +1,71 @@
-// TheSportsDB API - free tier (no key needed for basic queries)
+k// 1. YOUR PERFECT EXISTING SETUP
 const TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
 
-// League IDs from TheSportsDB
 const LEAGUES = {
-  // Cricket
   cricket_icc_mens: { id: "4844", name: "ICC Men's Cricket", sport: "cricket" },
   cricket_icc_womens: { id: "4759", name: "ICC Women's Cricket", sport: "cricket" },
   cricket_ipl: { id: "4910", name: "IPL", sport: "cricket" },
-  // Football
   premier_league: { id: "4328", name: "Premier League", sport: "football" },
   la_liga: { id: "4335", name: "La Liga", sport: "football" },
   ucl: { id: "4480", name: "UEFA Champions League", sport: "football" },
   bundesliga: { id: "4331", name: "Bundesliga", sport: "football" },
   serie_a: { id: "4332", name: "Serie A", sport: "football" },
   mls: { id: "4346", name: "MLS", sport: "football" },
-  // F1
   f1: { id: "4370", name: "Formula 1", sport: "f1" },
-  // Badminton
   bwf: { id: "4855", name: "BWF World Tour", sport: "badminton" },
 };
 
-function toIST(utcDateStr, utcTimeStr) {
-  try {
-    const dateTimeStr = utcTimeStr
-      ? `${utcDateStr}T${utcTimeStr}Z`
-      : `${utcDateStr}T00:00:00Z`;
-    const dt = new Date(dateTimeStr);
-    if (isNaN(dt.getTime())) return { date: utcDateStr, time: utcTimeStr || "TBD" };
-    // IST = UTC + 5:30
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const istDt = new Date(dt.getTime() + istOffset);
-    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    const dayName = days[istDt.getUTCDay()];
-    const dateFormatted = `${dayName}, ${istDt.getUTCDate()} ${months[istDt.getUTCMonth()]} ${istDt.getUTCFullYear()}`;
-    const h = istDt.getUTCHours();
-    const m = istDt.getUTCMinutes();
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    const timeFormatted = utcTimeStr
-      ? `${String(h12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm} IST`
-      : "Time TBD";
-    return { date: dateFormatted, time: timeFormatted, raw: istDt.toISOString() };
-  } catch {
-    return { date: utcDateStr, time: "TBD", raw: utcDateStr };
-  }
-}
-
-function getWeekRange() {
-  const now = new Date();
-  // Current week: today to 7 days ahead
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 7);
-  return { start, end };
-}
-
-async function fetchLeagueEvents(leagueId) {
-  try {
-    const res = await fetch(
-      `${TSDB_BASE}/eventsnextleague.php?id=${leagueId}`,
-      { next: { revalidate: 3600 } }
-    );
-    const data = await res.json();
-    return data.events || [];
-  } catch {
-    return [];
-  }
-}
-
-async function fetchLeaguePastEvents(leagueId) {
-  try {
-    const res = await fetch(
-      `${TSDB_BASE}/eventspastleague.php?id=${leagueId}`,
-      { next: { revalidate: 3600 } }
-    );
-    const data = await res.json();
-    return data.events || [];
-  } catch {
-    return [];
-  }
-}
+// 2. THE NEW CRICKET ADDITION
+const CRICKET_API_BASE = "https://api.cricapi.com/v1/currentMatches";
+const CRICKET_API_KEY = "a539af9a-6572-4111-9a4b-c23726cb1d2a";
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400");
+  try {
+    // We use a localized date for India (IST) so the matches match your timezone
+    const today = new Date().toLocaleDateString('en-CA'); // Formats to YYYY-MM-DD
 
-  const { start, end } = getWeekRange();
+    // --- FETCH FOOTBALL / F1 / BADMINTON (TheSportsDB) ---
+    const tsdbResponse = await fetch(`${TSDB_BASE}/eventsday.php?d=${today}`);
+    const tsdbData = await tsdbResponse.json();
+    let existingMatches = tsdbData.events || [];
 
-  const allEvents = [];
+    // --- FETCH IPL / DOMESTIC (CricketData.org) ---
+    const cricketResponse = await fetch(`${CRICKET_API_BASE}?apikey=${CRICKET_API_KEY}&offset=0`);
+    const cricketResult = await cricketResponse.json();
 
-  // Fetch all leagues in parallel
-  const leagueKeys = Object.keys(LEAGUES);
-  const fetches = leagueKeys.map(async (key) => {
-    const league = LEAGUES[key];
-    const [nextEvents, pastEvents] = await Promise.all([
-      fetchLeagueEvents(league.id),
-      fetchLeaguePastEvents(league.id),
-    ]);
-    return { key, league, events: [...nextEvents, ...pastEvents] };
-  });
-
-  const results = await Promise.all(fetches);
-
-  for (const { league, events } of results) {
-    for (const ev of events) {
-      const evDate = new Date(ev.dateEvent + "T00:00:00Z");
-      if (evDate >= start && evDate <= end) {
-        const ist = toIST(ev.dateEvent, ev.strTime);
-        allEvents.push({
-          id: ev.idEvent,
-          sport: league.sport,
-          leagueName: league.name,
-          homeTeam: ev.strHomeTeam,
-          awayTeam: ev.strAwayTeam,
-          venue: ev.strVenue || ev.strCountry || "",
-          country: ev.strCountry || "",
-          dateIST: ist.date,
-          timeIST: ist.time,
-          rawIST: ist.raw,
-          status: ev.strStatus || "Upcoming",
-          homeScore: ev.intHomeScore,
-          awayScore: ev.intAwayScore,
-          thumbnail: ev.strThumb || ev.strBanner || null,
-          season: ev.strSeason || "",
-          round: ev.intRound || ev.strRound || "",
-          description: ev.strDescriptionEN || "",
-        });
-      }
+    let cricketMatches = [];
+    if (cricketResult.status === "success" && cricketResult.data) {
+      cricketMatches = cricketResult.data
+        .filter(match => {
+          const name = match.name.toLowerCase();
+          // This keeps only the matches you actually care about
+          return name.includes("ipl") || 
+                 name.includes("indian premier league") || 
+                 name.includes("ranji") || 
+                 name.includes("trophy") ||
+                 name.includes("t20");
+        })
+        .map(match => ({
+          idEvent: match.id,
+          strEvent: match.name,
+          strLeague: match.series || "Cricket",
+          strTimestamp: match.dateTimeGMT,
+          strStatus: match.status,
+          strSport: "Cricket",
+          strHomeTeam: match.teams[0],
+          strAwayTeam: match.teams[1],
+          strThumb: "", 
+        }));
     }
+
+    // 3. MERGE EVERYTHING
+    // F1/Football comes first, Cricket gets added to the list
+    const combinedData = [...existingMatches, ...cricketMatches];
+
+    res.status(200).json(combinedData);
+
+  } catch (error) {
+    console.error("API Error:", error);
+    res.status(500).json({ error: "Failed to load the perfect sports feed" });
   }
-
-  // Sort by raw date
-  allEvents.sort((a, b) => new Date(a.rawIST) - new Date(b.rawIST));
-
-  // Group by sport
-  const grouped = {
-    cricket: allEvents.filter((e) => e.sport === "cricket"),
-    football: allEvents.filter((e) => e.sport === "football"),
-    f1: allEvents.filter((e) => e.sport === "f1"),
-    badminton: allEvents.filter((e) => e.sport === "badminton"),
-  };
-
-  res.json({
-    success: true,
-    weekStart: start.toISOString(),
-    weekEnd: end.toISOString(),
-    events: grouped,
-    total: allEvents.length,
-    fetchedAt: new Date().toISOString(),
-  });
 }
