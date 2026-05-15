@@ -10,7 +10,6 @@ const TSDB_LEAGUES = {
   serie_a:        { id: "4332", name: "Serie A",                 sport: "football" },
   ligue_1:        { id: "4334", name: "Ligue 1",                 sport: "football" },
   mls:            { id: "4346", name: "MLS",                     sport: "football" },
-  f1:             { id: "4370", name: "Formula 1",               sport: "f1" },
   bwf_tour:       { id: "4855", name: "BWF World Tour",          sport: "badminton" },
   bwf_champs:     { id: "4856", name: "BWF World Championships", sport: "badminton" },
   thomas_uber:    { id: "4857", name: "Thomas & Uber Cup",       sport: "badminton" },
@@ -67,7 +66,7 @@ function inWeek(dateStr, start, end) {
 
 async function tsdbFetch(path) {
   try {
-    const res = await fetch(`${TSDB_BASE}${path}`, { next: { revalidate: 3600 } });
+    const res = await fetch(`${TSDB_BASE}${path}`, { cache: "no-store" });
     const data = await res.json();
     return data.events || data.event || [];
   } catch { return []; }
@@ -75,7 +74,7 @@ async function tsdbFetch(path) {
 
 async function cricFetch(path) {
   try {
-    const res = await fetch(`${CRICKET_BASE}${path}&apikey=${CRICKET_API_KEY}`, { next: { revalidate: 3600 } });
+    const res = await fetch(`${CRICKET_BASE}${path}&apikey=${CRICKET_API_KEY}`, { cache: "no-store" });
     const data = await res.json();
     return data.data || [];
   } catch { return []; }
@@ -88,7 +87,7 @@ async function cricbuzzIPL() {
         "X-RapidAPI-Key": "30c8f328a9mshbefd10f01c42e39p1e8178jsn93e03897a29d",
         "X-RapidAPI-Host": "cricbuzz-cricket.p.rapidapi.com",
       },
-      next: { revalidate: 3600 },
+      cache: "no-store",
     });
     const data = await res.json();
     const matches = [];
@@ -96,9 +95,7 @@ async function cricbuzzIPL() {
       for (const s of type.seriesMatches || []) {
         const wrapper = s.seriesAdWrapper;
         if (wrapper && wrapper.seriesId === 9241) {
-          for (const m of wrapper.matches || []) {
-            matches.push(m);
-          }
+          for (const m of wrapper.matches || []) matches.push(m);
         }
       }
     }
@@ -113,7 +110,7 @@ async function cricbuzzIPLLive() {
         "X-RapidAPI-Key": "30c8f328a9mshbefd10f01c42e39p1e8178jsn93e03897a29d",
         "X-RapidAPI-Host": "cricbuzz-cricket.p.rapidapi.com",
       },
-      next: { revalidate: 3600 },
+      cache: "no-store",
     });
     const data = await res.json();
     const matches = [];
@@ -121,9 +118,7 @@ async function cricbuzzIPLLive() {
       for (const s of type.seriesMatches || []) {
         const wrapper = s.seriesAdWrapper;
         if (wrapper && wrapper.seriesId === 9241) {
-          for (const m of wrapper.matches || []) {
-            matches.push(m);
-          }
+          for (const m of wrapper.matches || []) matches.push(m);
         }
       }
     }
@@ -131,8 +126,62 @@ async function cricbuzzIPLLive() {
   } catch { return []; }
 }
 
+async function fetchF1Week(start, end) {
+  try {
+    const events = [];
+    const [curRes, nextRes] = await Promise.all([
+      fetch("https://api.jolpi.ca/ergast/f1/2026/current.json", { cache: "no-store" }),
+      fetch("https://api.jolpi.ca/ergast/f1/2026/next.json", { cache: "no-store" }),
+    ]);
+    const curData = await curRes.json();
+    const nextData = await nextRes.json();
+    const races = [
+      ...(curData.MRData?.RaceTable?.Races || []),
+      ...(nextData.MRData?.RaceTable?.Races || []),
+    ];
+    for (const race of races) {
+      const gp = race.raceName;
+      const circuit = race.Circuit?.circuitName || "";
+      const city = race.Circuit?.Location?.locality || "";
+      const venue = `${circuit}, ${city}`;
+      const sessions = [
+        { name: "Practice 1",        date: race.FirstPractice?.date,     time: race.FirstPractice?.time },
+        { name: "Practice 2",        date: race.SecondPractice?.date,    time: race.SecondPractice?.time },
+        { name: "Practice 3",        date: race.ThirdPractice?.date,     time: race.ThirdPractice?.time },
+        { name: "Sprint Qualifying", date: race.SprintQualifying?.date,  time: race.SprintQualifying?.time },
+        { name: "Sprint",            date: race.Sprint?.date,            time: race.Sprint?.time },
+        { name: "Qualifying",        date: race.Qualifying?.date,        time: race.Qualifying?.time },
+        { name: "Race",              date: race.date,                    time: race.time },
+      ];
+      for (const session of sessions) {
+        if (!session.date) continue;
+        if (!inWeek(session.date, start, end)) continue;
+        const timeUTC = session.time?.replace("Z", "") || null;
+        const ist = toIST(session.date, timeUTC);
+        events.push({
+          id: `f1_${race.round}_${session.name.replace(/\s/g, "_")}`,
+          sport: "f1",
+          leagueName: "Formula 1 — " + gp,
+          homeTeam: session.name,
+          awayTeam: `Round ${race.round}`,
+          venue,
+          dateIST: ist.date,
+          timeIST: ist.time,
+          rawIST: ist.raw,
+          status: "Upcoming",
+          homeScore: null,
+          awayScore: null,
+          season: "2026",
+          round: session.name,
+        });
+      }
+    }
+    return events;
+  } catch { return []; }
+}
+
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400");
+  res.setHeader("Cache-Control", "no-store, max-age=0");
 
   const { start, end } = getWeekRange();
   const allEvents = [];
@@ -154,16 +203,17 @@ export default async function handler(req, res) {
     events: await tsdbFetch(`/searchevents.php?e=${encodeURIComponent(q)}`),
   }));
 
-  const [tsdbResults, badmintonResults, cricCurrent, cricMatches, iplUpcoming, iplLive] = await Promise.all([
+  const [tsdbResults, badmintonResults, cricCurrent, cricMatches, iplUpcoming, iplLive, f1Events] = await Promise.all([
     Promise.all(tsdbFetches),
     Promise.all(badmintonSearches),
     cricFetch(`/currentMatches?offset=0`),
     cricFetch(`/matches?offset=0`),
     cricbuzzIPL(),
     cricbuzzIPLLive(),
+    fetchF1Week(start, end),
   ]);
 
-  // TSDB — football, f1, badminton
+  // TSDB — football and badminton
   for (const { league, events } of tsdbResults) {
     for (const ev of events) {
       const dateStr = extractDate(ev);
@@ -201,6 +251,13 @@ export default async function handler(req, res) {
         season: ev.strSeason || "", round: "",
       });
     }
+  }
+
+  // F1 sessions from Jolpica
+  for (const ev of f1Events) {
+    if (seenIds.has(ev.id)) continue;
+    seenIds.add(ev.id);
+    allEvents.push(ev);
   }
 
   // IPL 2026 from Cricbuzz
