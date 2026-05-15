@@ -3,21 +3,24 @@ const CRICKET_API_KEY = "a539af9a-6572-4111-9a4b-c23726cb1d2a";
 const CRICKET_BASE = "https://api.cricapi.com/v1";
 
 const TSDB_LEAGUES = {
-  premier_league: { id: "4328", name: "Premier League",          sport: "football" },
-  la_liga:        { id: "4335", name: "La Liga",                  sport: "football" },
-  ucl:            { id: "4480", name: "UEFA Champions League",    sport: "football" },
-  bundesliga:     { id: "4331", name: "Bundesliga",               sport: "football" },
-  serie_a:        { id: "4332", name: "Serie A",                  sport: "football" },
-  ligue_1:        { id: "4334", name: "Ligue 1",                  sport: "football" },
-  mls:            { id: "4346", name: "MLS",                      sport: "football" },
-  f1:             { id: "4370", name: "Formula 1",                sport: "f1" },
-  bwf_tour:       { id: "4855", name: "BWF World Tour",           sport: "badminton" },
-  bwf_champs:     { id: "4856", name: "BWF World Championships",  sport: "badminton" },
-  thomas_uber:    { id: "4857", name: "Thomas & Uber Cup",        sport: "badminton" },
-  sudirman:       { id: "4997", name: "Sudirman Cup",             sport: "badminton" },
-  bwf_super:      { id: "4998", name: "BWF Super Series",         sport: "badminton" },
-  asia_badminton: { id: "5001", name: "Badminton Asia Champs",    sport: "badminton" },
+  premier_league: { id: "4328", name: "Premier League",         sport: "football" },
+  la_liga:        { id: "4335", name: "La Liga",                 sport: "football" },
+  ucl:            { id: "4480", name: "UEFA Champions League",   sport: "football" },
+  bundesliga:     { id: "4331", name: "Bundesliga",              sport: "football" },
+  serie_a:        { id: "4332", name: "Serie A",                 sport: "football" },
+  ligue_1:        { id: "4334", name: "Ligue 1",                 sport: "football" },
+  mls:            { id: "4346", name: "MLS",                     sport: "football" },
+  f1:             { id: "4370", name: "Formula 1",               sport: "f1" },
+  bwf_tour:       { id: "4855", name: "BWF World Tour",          sport: "badminton" },
+  bwf_champs:     { id: "4856", name: "BWF World Championships", sport: "badminton" },
+  thomas_uber:    { id: "4857", name: "Thomas & Uber Cup",       sport: "badminton" },
+  sudirman:       { id: "4997", name: "Sudirman Cup",            sport: "badminton" },
+  bwf_super:      { id: "4998", name: "BWF Super Series",        sport: "badminton" },
+  asia_badminton: { id: "5001", name: "Badminton Asia Champs",   sport: "badminton" },
 };
+
+// IPL 2026 series ID on CricAPI
+const IPL_SERIES_ID = "d5a498c8-7596-4b93-8ab0-e0efc3345312";
 
 function toIST(utcDateStr, utcTimeStr) {
   try {
@@ -48,6 +51,19 @@ function getWeekRange() {
   return { start, end };
 }
 
+// Extract date string from either dateEvent or strTimestamp
+function extractDate(ev) {
+  if (ev.dateEvent) return ev.dateEvent;
+  if (ev.strTimestamp) return ev.strTimestamp.split("T")[0];
+  return null;
+}
+
+function extractTime(ev) {
+  if (ev.strTime) return ev.strTime;
+  if (ev.strTimestamp) return ev.strTimestamp.split("T")[1] || null;
+  return null;
+}
+
 function inWeek(dateStr, start, end) {
   const d = new Date(dateStr + "T00:00:00Z");
   return d >= start && d <= end;
@@ -61,17 +77,9 @@ async function tsdbFetch(path) {
   } catch { return []; }
 }
 
-async function cricketCurrentMatches() {
+async function cricFetch(path) {
   try {
-    const res = await fetch(`${CRICKET_BASE}/currentMatches?apikey=${CRICKET_API_KEY}&offset=0`, { next: { revalidate: 3600 } });
-    const data = await res.json();
-    return data.data || [];
-  } catch { return []; }
-}
-
-async function cricketMatches() {
-  try {
-    const res = await fetch(`${CRICKET_BASE}/matches?apikey=${CRICKET_API_KEY}&offset=0`, { next: { revalidate: 3600 } });
+    const res = await fetch(`${CRICKET_BASE}${path}&apikey=${CRICKET_API_KEY}`, { next: { revalidate: 3600 } });
     const data = await res.json();
     return data.data || [];
   } catch { return []; }
@@ -100,19 +108,22 @@ export default async function handler(req, res) {
     events: await tsdbFetch(`/searchevents.php?e=${encodeURIComponent(q)}`),
   }));
 
-  const [tsdbResults, badmintonResults, cricCurrent, cricAll] = await Promise.all([
+  const [tsdbResults, badmintonResults, cricCurrent, cricMatches, iplMatches] = await Promise.all([
     Promise.all(tsdbFetches),
     Promise.all(badmintonSearches),
-    cricketCurrentMatches(),
-    cricketMatches(),
+    cricFetch(`/currentMatches?offset=0`),
+    cricFetch(`/matches?offset=0`),
+    cricFetch(`/series_info?id=${IPL_SERIES_ID}`),
   ]);
 
+  // TSDB football, f1, badminton
   for (const { league, events } of tsdbResults) {
     for (const ev of events) {
-      if (!ev.dateEvent || seenIds.has(ev.idEvent)) continue;
-      if (!inWeek(ev.dateEvent, start, end)) continue;
+      const dateStr = extractDate(ev);
+      if (!dateStr || seenIds.has(ev.idEvent)) continue;
+      if (!inWeek(dateStr, start, end)) continue;
       seenIds.add(ev.idEvent);
-      const ist = toIST(ev.dateEvent, ev.strTime);
+      const ist = toIST(dateStr, extractTime(ev));
       allEvents.push({
         id: ev.idEvent, sport: league.sport, leagueName: league.name,
         homeTeam: ev.strHomeTeam, awayTeam: ev.strAwayTeam,
@@ -125,12 +136,14 @@ export default async function handler(req, res) {
     }
   }
 
+  // Badminton search results
   for (const { sport, events } of badmintonResults) {
     for (const ev of events) {
-      if (!ev.dateEvent || seenIds.has(ev.idEvent)) continue;
-      if (!inWeek(ev.dateEvent, start, end)) continue;
+      const dateStr = extractDate(ev);
+      if (!dateStr || seenIds.has(ev.idEvent)) continue;
+      if (!inWeek(dateStr, start, end)) continue;
       seenIds.add(ev.idEvent);
-      const ist = toIST(ev.dateEvent, ev.strTime);
+      const ist = toIST(dateStr, extractTime(ev));
       allEvents.push({
         id: ev.idEvent, sport, leagueName: ev.strLeague || "Badminton",
         homeTeam: ev.strHomeTeam, awayTeam: ev.strAwayTeam,
@@ -143,8 +156,17 @@ export default async function handler(req, res) {
     }
   }
 
-  const cricAllMatches = [...cricCurrent, ...cricAll];
-  for (const m of cricAllMatches) {
+  // CricAPI — all cricket matches
+  const allCricMatches = [...cricCurrent, ...cricMatches];
+
+  // Add IPL matches from series_info
+  if (iplMatches && iplMatches.matchList) {
+    for (const m of iplMatches.matchList) {
+      allCricMatches.push({ ...m, series: "IPL 2026" });
+    }
+  }
+
+  for (const m of allCricMatches) {
     if (!m.id || seenIds.has(m.id)) continue;
     const rawDate = m.dateTimeGMT || m.date || "";
     if (!rawDate) continue;
@@ -157,7 +179,7 @@ export default async function handler(req, res) {
     const score = m.score || [];
     allEvents.push({
       id: m.id, sport: "cricket",
-      leagueName: m.series || m.matchType || "Cricket",
+      leagueName: m.series || m.name?.split(",").slice(1).join(",").trim() || m.matchType || "Cricket",
       homeTeam: teams[0] || "TBD",
       awayTeam: teams[1] || "TBD",
       venue: m.venue || "",
