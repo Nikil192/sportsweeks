@@ -19,9 +19,6 @@ const TSDB_LEAGUES = {
   asia_badminton: { id: "5001", name: "Badminton Asia Champs",   sport: "badminton" },
 };
 
-// IPL 2026 series ID on CricAPI
-const IPL_SERIES_ID = "d5a498c8-7596-4b93-8ab0-e0efc3345312";
-
 function toIST(utcDateStr, utcTimeStr) {
   try {
     const dateTimeStr = utcTimeStr ? `${utcDateStr}T${utcTimeStr}Z` : `${utcDateStr}T00:00:00Z`;
@@ -51,7 +48,6 @@ function getWeekRange() {
   return { start, end };
 }
 
-// Extract date string from either dateEvent or strTimestamp
 function extractDate(ev) {
   if (ev.dateEvent) return ev.dateEvent;
   if (ev.strTimestamp) return ev.strTimestamp.split("T")[0];
@@ -134,6 +130,7 @@ async function cricbuzzIPLLive() {
     return matches;
   } catch { return []; }
 }
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400");
 
@@ -158,14 +155,15 @@ export default async function handler(req, res) {
   }));
 
   const [tsdbResults, badmintonResults, cricCurrent, cricMatches, iplUpcoming, iplLive] = await Promise.all([
-     Promise.all(tsdbFetches),
-     Promise.all(badmintonSearches),
-     cricFetch(`/currentMatches?offset=0`),
-     cricFetch(`/matches?offset=0`),
-     cricbuzzIPL(),
-     cricbuzzIPLLive(),
-   ]);
-  // TSDB football, f1, badminton
+    Promise.all(tsdbFetches),
+    Promise.all(badmintonSearches),
+    cricFetch(`/currentMatches?offset=0`),
+    cricFetch(`/matches?offset=0`),
+    cricbuzzIPL(),
+    cricbuzzIPLLive(),
+  ]);
+
+  // TSDB — football, f1, badminton
   for (const { league, events } of tsdbResults) {
     for (const ev of events) {
       const dateStr = extractDate(ev);
@@ -205,41 +203,34 @@ export default async function handler(req, res) {
     }
   }
 
-  // CricAPI — all cricket matches
-const allCricMatches = [...cricCurrent, ...cricMatches];
-
-// Add IPL from Cricbuzz
-for (const m of [...iplUpcoming, ...iplLive]) {
-  const mi = m.matchInfo;
-  if (!mi) continue;
-  const startMs = parseInt(mi.startDate);
-  const dateObj = new Date(startMs);
-  const dateOnly = dateObj.toISOString().split("T")[0];
-  const timeOnly = dateObj.toISOString().split("T")[1].replace("Z","");
-  if (!inWeek(dateOnly, start, end)) continue;
-  const id = "ipl_" + mi.matchId;
-  if (seenIds.has(id)) continue;
-  seenIds.add(id);
-  const ist = toIST(dateOnly, timeOnly);
-  allEvents.push({
-    id, sport: "cricket",
-    leagueName: "IPL 2026",
-    homeTeam: mi.team1?.teamName || "TBD",
-    awayTeam: mi.team2?.teamName || "TBD",
-    venue: mi.venueInfo?.ground + ", " + mi.venueInfo?.city || "",
-    dateIST: ist.date, timeIST: ist.time, rawIST: ist.raw,
-    status: mi.status || mi.state || "Upcoming",
-    homeScore: null, awayScore: null,
-    season: "2026", round: mi.matchDesc || "",
-  });
-}
-  // Add IPL matches from series_info
-  if (iplMatches && iplMatches.matchList) {
-    for (const m of iplMatches.matchList) {
-      allCricMatches.push({ ...m, series: "IPL 2026" });
-    }
+  // IPL 2026 from Cricbuzz
+  for (const m of [...iplUpcoming, ...iplLive]) {
+    const mi = m.matchInfo;
+    if (!mi) continue;
+    const startMs = parseInt(mi.startDate);
+    const dateObj = new Date(startMs);
+    const dateOnly = dateObj.toISOString().split("T")[0];
+    const timeOnly = dateObj.toISOString().split("T")[1].replace("Z", "");
+    if (!inWeek(dateOnly, start, end)) continue;
+    const id = "ipl_" + mi.matchId;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    const ist = toIST(dateOnly, timeOnly);
+    allEvents.push({
+      id, sport: "cricket",
+      leagueName: "IPL 2026",
+      homeTeam: mi.team1?.teamName || "TBD",
+      awayTeam: mi.team2?.teamName || "TBD",
+      venue: (mi.venueInfo?.ground || "") + (mi.venueInfo?.city ? ", " + mi.venueInfo.city : ""),
+      dateIST: ist.date, timeIST: ist.time, rawIST: ist.raw,
+      status: mi.status || mi.state || "Upcoming",
+      homeScore: null, awayScore: null,
+      season: "2026", round: mi.matchDesc || "",
+    });
   }
 
+  // CricAPI — all other cricket
+  const allCricMatches = [...cricCurrent, ...cricMatches];
   for (const m of allCricMatches) {
     if (!m.id || seenIds.has(m.id)) continue;
     const rawDate = m.dateTimeGMT || m.date || "";
