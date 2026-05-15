@@ -41,12 +41,12 @@ function toIST(utcDateStr, utcTimeStr) {
 
 function getWeekRange() {
   const start = new Date();
+  start.setDate(start.getDate() - 1);
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
-  end.setDate(end.getDate() + 12);
+  end.setDate(end.getDate() + 11);
   return { start, end };
 }
-
 function extractDate(ev) {
   if (ev.dateEvent) return ev.dateEvent;
   if (ev.strTimestamp) return ev.strTimestamp.split("T")[0];
