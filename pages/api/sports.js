@@ -1,4 +1,4 @@
-const TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
+kconst TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
 const CRICKET_API_KEY = "a539af9a-6572-4111-9a4b-c23726cb1d2a";
 const CRICKET_BASE = "https://api.cricapi.com/v1";
 
@@ -47,6 +47,7 @@ function getWeekRange() {
   end.setDate(end.getDate() + 11);
   return { start, end };
 }
+
 function extractDate(ev) {
   if (ev.dateEvent) return ev.dateEvent;
   if (ev.strTimestamp) return ev.strTimestamp.split("T")[0];
@@ -145,18 +146,18 @@ async function fetchF1Week(start, end) {
       const city = race.Circuit?.Location?.locality || "";
       const venue = `${circuit}, ${city}`;
       const sessions = [
-        { name: "Practice 1",        date: race.FirstPractice?.date,     time: race.FirstPractice?.time },
-        { name: "Practice 2",        date: race.SecondPractice?.date,    time: race.SecondPractice?.time },
-        { name: "Practice 3",        date: race.ThirdPractice?.date,     time: race.ThirdPractice?.time },
-        { name: "Sprint Qualifying", date: race.SprintQualifying?.date,  time: race.SprintQualifying?.time },
-        { name: "Sprint",            date: race.Sprint?.date,            time: race.Sprint?.time },
-        { name: "Qualifying",        date: race.Qualifying?.date,        time: race.Qualifying?.time },
-        { name: "Race",              date: race.date,                    time: race.time },
+        { name: "Practice 1",        date: race.FirstPractice?.date,    time: race.FirstPractice?.time },
+        { name: "Practice 2",        date: race.SecondPractice?.date,   time: race.SecondPractice?.time },
+        { name: "Practice 3",        date: race.ThirdPractice?.date,    time: race.ThirdPractice?.time },
+        { name: "Sprint Qualifying", date: race.SprintQualifying?.date, time: race.SprintQualifying?.time },
+        { name: "Sprint",            date: race.Sprint?.date,           time: race.Sprint?.time },
+        { name: "Qualifying",        date: race.Qualifying?.date,       time: race.Qualifying?.time },
+        { name: "Race",              date: race.date,                   time: race.time },
       ];
       for (const session of sessions) {
         if (!session.date) continue;
         if (!inWeek(session.date, start, end)) continue;
-        const timeUTC = session.time?.replace("Z", "") || null;
+        const timeUTC = session.time ? session.time.replace("Z", "") : null;
         const ist = toIST(session.date, timeUTC);
         events.push({
           id: `f1_${race.round}_${session.name.replace(/\s/g, "_")}`,
@@ -203,15 +204,23 @@ export default async function handler(req, res) {
     events: await tsdbFetch(`/searchevents.php?e=${encodeURIComponent(q)}`),
   }));
 
-const [tsdbResults, badmintonResults, cricCurrent, [cricMatches1, cricMatches2, cricMatches3], iplUpcoming, iplLive, f1Events]
+  const [
+    tsdbResults,
+    badmintonResults,
+    cricCurrent,
+    cricMatches0,
+    cricMatches1,
+    cricMatches2,
+    iplUpcoming,
+    iplLive,
+    f1Events,
+  ] = await Promise.all([
     Promise.all(tsdbFetches),
     Promise.all(badmintonSearches),
     cricFetch(`/currentMatches?offset=0`),
-    Promise.all([
-     cricFetch(`/matches?offset=0`),
-     cricFetch(`/matches?offset=25`),
-     cricFetch(`/matches?offset=50`),
-    ]),
+    cricFetch(`/matches?offset=0`),
+    cricFetch(`/matches?offset=25`),
+    cricFetch(`/matches?offset=50`),
     cricbuzzIPL(),
     cricbuzzIPLLive(),
     fetchF1Week(start, end),
@@ -291,8 +300,8 @@ const [tsdbResults, badmintonResults, cricCurrent, [cricMatches1, cricMatches2, 
   }
 
   // CricAPI — all other cricket
-const allCricMatches = [...cricCurrent, ...cricMatches1, ...cricMatches2, ...cricMatches3];  
-for (const m of allCricMatches) {
+  const allCricMatches = [...cricCurrent, ...cricMatches0, ...cricMatches1, ...cricMatches2];
+  for (const m of allCricMatches) {
     if (!m.id || seenIds.has(m.id)) continue;
     const rawDate = m.dateTimeGMT || m.date || "";
     if (!rawDate) continue;
