@@ -1,4 +1,4 @@
-kconst TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
+const TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
 const CRICKET_API_KEY = "a539af9a-6572-4111-9a4b-c23726cb1d2a";
 const CRICKET_BASE = "https://api.cricapi.com/v1";
 
